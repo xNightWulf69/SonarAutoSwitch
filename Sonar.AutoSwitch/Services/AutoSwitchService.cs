@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Text.RegularExpressions;
 using Sonar.AutoSwitch.ViewModels;
 
 namespace Sonar.AutoSwitch.Services;
@@ -10,8 +11,8 @@ public class AutoSwitchService
 {
     private readonly HomeViewModel _homeViewModel;
     private readonly SemaphoreSlim _semaphoreSlim = new SemaphoreSlim(1, 1);
-    private SonarGamingConfiguration _selectedGamingConfiguration;
-    private CancellationTokenSource _cancellationTokenSource;
+    private SonarGamingConfiguration? _selectedGamingConfiguration;
+    private CancellationTokenSource? _cancellationTokenSource;
 
     public AutoSwitchService()
     {
@@ -38,6 +39,7 @@ public class AutoSwitchService
         _cancellationTokenSource?.Cancel();
         _cancellationTokenSource?.Dispose();
         _cancellationTokenSource = new CancellationTokenSource();
+
         await _semaphoreSlim.WaitAsync();
         try
         {
@@ -52,9 +54,11 @@ public class AutoSwitchService
                 autoSwitchProfileViewModels.FirstOrDefault(p =>
                     (string.IsNullOrEmpty(p.ExeName) ||
                      string.Equals(p.ExeName, windowExeName, StringComparison.OrdinalIgnoreCase)) &&
-                    (string.IsNullOrEmpty(p.Title) || e.Title.Contains(p.Title, StringComparison.OrdinalIgnoreCase)));
+                    (string.IsNullOrEmpty(p.Title) || MatchesWildcard(e.Title, p.Title)));
+
             SonarGamingConfiguration? sonarGamingConfiguration = autoSwitchProfileViewModel?.SonarGamingConfiguration;
             sonarGamingConfiguration ??= _homeViewModel.DefaultSonarGamingConfiguration;
+
             if (string.IsNullOrEmpty(sonarGamingConfiguration.Id) ||
                 _selectedGamingConfiguration == sonarGamingConfiguration)
                 return;
@@ -62,8 +66,10 @@ public class AutoSwitchService
             string selectedGamingConfigurationId =
                 SteelSeriesSonarService.Instance.GetSelectedGamingConfiguration();
             _selectedGamingConfiguration = sonarGamingConfiguration;
+
             if (sonarGamingConfiguration.Id == selectedGamingConfigurationId)
                 return;
+
             await SteelSeriesSonarService.Instance.ChangeSelectedGamingConfiguration(sonarGamingConfiguration,
                 _cancellationTokenSource.Token);
         }
@@ -71,5 +77,11 @@ public class AutoSwitchService
         {
             _semaphoreSlim.Release();
         }
+    }
+
+    private bool MatchesWildcard(string input, string pattern)
+    {
+        string regexPattern = "^" + Regex.Escape(pattern).Replace("\\*", ".*") + "$";
+        return Regex.IsMatch(input, regexPattern, RegexOptions.IgnoreCase);
     }
 }
